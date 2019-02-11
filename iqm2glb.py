@@ -12,6 +12,8 @@ DEFAULT_OPTIONS = {
     'model_name': '',
     # Character encoding for text suitable for Python's bytes.decode().
     'character_encoding': 'utf-8',
+    # Whether the triangles are wound clockwise in the IQM.
+    'triangles_cw': True,
     # When an IQM material name looks like an image path (ex. because it ends
     # with .png), use it as the path for a baseColorTexture for that material.
     'guess_texture_names': True,
@@ -255,26 +257,25 @@ def iqm2glb(iqm, options={}):
 
             vertex_arrays[vertex_array_type] = len(gltf['accessors']) - 1
 
-    # Make index accessors
+    # Make indices' buffer view
     if ofs_triangles and num_triangles:
-        if num_vertexes <= 0xffff:
-            # Repack as USHORTs
-            index_size = 2
-            _pad_to_alignment(buffer, 2)
-            offset = len(buffer)
-            for i in range(0, num_triangles):
-                tri = IQM_TRIANGLE.unpack_from(iqm, offset=ofs_triangles + i*3*4)
-                buffer += struct.pack('<3H', *tri)
+        if options['triangles_cw']:
+            def rewind_tri(tri): return (tri[0], tri[2], tri[1])
         else:
-            index_size = 4
-            _pad_to_alignment(buffer, 4)
-            offset = len(buffer)
-            buffer += iqm[ofs_triangles:ofs_triangles + 3 * 4 * num_triangles]
+            def rewind_tri(tri): return tri
+        # Pack indices as USHORTs when possible
+        index_size = 2 if num_vertexes <= 0xffff else 4
+        fmt = struct.Struct('<3H' if index_size == 2 else '<3I')
 
+        tris = struct.unpack_from(f'<{3*num_triangles}I', iqm, ofs_triangles)
+        _pad_to_alignment(buffer, 4)
+        byte_offset = len(buffer)
+        for i in range(0, 3*num_triangles, 3):
+            buffer += fmt.pack(*rewind_tri(tris[i:i + 3]))
         gltf.setdefault('bufferViews', {}).append({
             'buffer': 0,
-            'byteOffset': offset,
-            'byteLength': len(buffer) - offset,
+            'byteOffset': byte_offset,
+            'byteLength': len(buffer) - byte_offset,
         })
         index_bufferview = len(gltf['bufferViews']) - 1
 
@@ -342,9 +343,11 @@ def iqm2glb(iqm, options={}):
 
         # Adjaceny
         if ofs_adjacency and options['include_adjacency']:
+            adjacency = struct.unpack_from(f'<{3*num_triangles}I', iqm, ofs_adjacency)
             _pad_to_alignment(buffer, 4)
             byte_offset = len(buffer)
-            buffer += iqm[ofs_adjacency:ofs_adjacency + 4*3*num_triangles]
+            for i in range(0, 3*num_triangles, 3):
+                buffer += struct.pack('<3I', *rewind_tri(adjacency[i:i + 3]))
             gltf.setdefault('bufferViews', {}).append({
                 'buffer': 0,
                 'byteOffset': byte_offset,
