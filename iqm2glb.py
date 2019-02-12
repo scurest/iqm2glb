@@ -436,6 +436,11 @@ def iqm2glb(iqm, options={}):
         if options['model_name']:
             gltf['nodes'][-1]['name'] = options['model_name']
 
+        gltf['scenes'] = [{
+            'nodes': roots + [len(gltf['nodes']) - 1],
+        }]
+        gltf['scene'] = 0
+
     if ofs_anims and num_anims and options['include_animations']:
         # constant_trs[joint_idx][trs] contains the value of that TRS property
         # for that joint when it is constant over all time
