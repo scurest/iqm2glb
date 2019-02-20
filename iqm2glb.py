@@ -133,16 +133,10 @@ def iqm2glb(iqm, options={}):
     gltf = {'asset': {'version': '2.0'}}
     buffer = bytearray()
 
-    if ofs_comment and num_comment:
-        comments = []
-        ofs = ofs_comment
-        while len(comments) < num_comment:
-            end = iqm.find(b'\0', ofs)
-            comments.append(
-                bytes(iqm[ofs:end]).decode(options['character_encoding'], errors='replace')
-            )
-            ofs = end + 1
-        gltf.setdefault('extras', {})['iqm_comments'] = comments
+    if ofs_comment:
+        end = iqm.find(b'\0', ofs_comment)
+        comment = iqm[ofs_comment:end].decode(options['character_encoding'], errors='replace')
+        gltf.setdefault('extras', {})['iqm_comment'] = comment
 
     # Turn vertex arrays into accessors
     if ofs_vertexarrays and num_vertexarrays and num_vertexes:
