@@ -279,17 +279,31 @@ def iqm2glb(iqm, options={}):
         })
         index_bufferview = len(gltf['bufferViews']) - 1
 
-    # Create the mesh (one glTF primitive = one IQM mesh)
+    # Create meshes.
+    # One glTF mesh per name; two IQM meshes with the same become
+    # primitives of the same glTF mesh.
     if ofs_meshes and num_meshes:
-        primitives = []
+        name_to_mesh = {}
         material_names = []
+        gltf['meshes'] = []
         for i in range(0, num_meshes):
             name, material, __first_vertex, __num_vertices, first_triangle, num_triangles = \
                 IQM_MESH.unpack_from(iqm, offset=ofs_meshes + i*IQM_MESH.size)
 
-            primitive = {}
+            name = get_string(name)
             if name:
-                primitive.setdefault('extras', {})['name'] = get_string(name)
+                if name in name_to_mesh:
+                    mesh = name_to_mesh[name]
+                else:
+                    mesh = {'name': name, 'primitives': []}
+                    name_to_mesh[name] = mesh
+                    gltf['meshes'].append(mesh)
+            else:
+                mesh = {'primitives': []}
+                gltf['meshes'].append(mesh)
+            primitives = mesh['primitives']
+
+            primitive = {}
             if material:
                 material_name = get_string(material)
                 if material_name not in material_names:
@@ -319,11 +333,6 @@ def iqm2glb(iqm, options={}):
             primitive['indices'] = len(gltf['accessors']) - 1
 
             primitives.append(primitive)
-
-        gltf['meshes'] = [{'primitives': primitives}]
-
-        if options['model_name']:
-            gltf['meshes'][0]['name'] = options['model_name']
 
         # Create materials
         if material_names:
@@ -362,11 +371,12 @@ def iqm2glb(iqm, options={}):
             gltf['meshes'][0].setdefault('extras', {})['iqm_adjacency'] = len(gltf['accessors']) - 1
 
     # Create nodes
+    needs_skin = False
+    roots = []  # roots of joint forest
     if ofs_joints and num_joints:
         nodes = [{} for i in range(0, num_joints)]
         parents = [None] * num_joints  # parent's index for nth node
         parent_to_local_mats = [None] * num_joints
-        roots = []  # roots of node forest
 
         for i in range(0, num_joints):
             name, parent, tx, ty, tz, qx, qy, qz, qw, sx, sy, sz = \
@@ -427,18 +437,27 @@ def iqm2glb(iqm, options={}):
             })
             skin['inverseBindMatrices'] = len(gltf['accessors']) - 1
 
+            if options['model_name']:
+                skin['name'] = options['model_name'] + '.amt'
+
             gltf['skins'] = [skin]
 
-        # Add a new node to instantiate the mesh/skin at
-        gltf['nodes'].append({'mesh': 0})
-        if needs_skin:
-            gltf['nodes'][-1]['skin'] = 0
-        if options['model_name']:
-            gltf['nodes'][-1]['name'] = options['model_name']
+    # Instantiate meshes
+    if num_meshes:
+        for idx, __mesh in enumerate(gltf['meshes']):
+            gltf.setdefault('nodes', []).append({'mesh': idx})
+            if needs_skin:
+                gltf['nodes'][-1]['skin'] = 0
 
+    # Scene
+    if num_meshes or num_joints:
         gltf['scenes'] = [{
-            'nodes': roots + [len(gltf['nodes']) - 1],
+            'nodes':
+                roots +
+                [len(gltf['nodes']) - 1 - i for i, __mesh in enumerate(gltf['meshes'])],
         }]
+        if options['model_name']:
+            gltf['scenes'][0]['name'] = options['model_name']
         gltf['scene'] = 0
 
     if ofs_anims and num_anims and options['include_animations']:
